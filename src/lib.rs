@@ -1,15 +1,15 @@
 #![allow(unused_doc_comments)]
 
-pub mod build_info;
+#[macro_use]
+mod lazy_regex;
 
-extern crate regex;
+pub mod build_info;
+pub mod version;
+
 extern crate which;
 
 extern crate serde;
 extern crate serde_json;
-
-#[macro_use]
-extern crate lazy_static;
 
 // conan.cmake wrapper reference
 // https://github.com/conan-io/cmake-conan/blob/develop/conan.cmake
@@ -19,18 +19,16 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use regex::Regex;
-
+use crate::version::ConanVersion;
 use build_info::{build_settings::BuildSettings, BuildInfo};
 
 /**
  * conan detection
  */
 
-lazy_static! {
-    static ref REGEX_CONAN_VERSION: Regex = Regex::new(r"version (\d+)\.(\d+).(\d+)$").unwrap();
-}
-
+/// Finds the default Conan executable in `PATH`.
+///
+/// The executable path can be overriden by setting `CONAN` environment variable.
 pub fn find_program() -> Option<PathBuf> {
     if let Ok(conan) = env::var("CONAN") {
         return Some(PathBuf::from(conan));
@@ -38,29 +36,13 @@ pub fn find_program() -> Option<PathBuf> {
     which::which("conan").ok()
 }
 
+/// Finds the default Conan executable version.
+///
+/// Returns a version string such as `"1.2.3"`.
 pub fn find_version() -> Option<String> {
-    let conan_program = find_program()?;
-    let conan_program = conan_program.as_path().to_str().unwrap().to_string();
+    let version = ConanVersion::detect()?;
 
-    let output = Command::new(&conan_program).arg("--version").output();
-
-    // $ conan --version
-    // Conan version 1.14.3
-
-    if let Ok(output) = output {
-        let output_stdout = String::from_utf8(output.stdout).unwrap();
-        let captures = REGEX_CONAN_VERSION.captures(output_stdout.as_str().trim()).unwrap();
-
-        let version_major = captures[1].parse::<u8>().unwrap();
-        let version_minor = captures[2].parse::<u8>().unwrap();
-        let version_micro = captures[3].parse::<u8>().unwrap();
-
-        let version = format!("{}.{}.{}", version_major, version_minor, version_micro);
-
-        return Some(version);
-    }
-
-    None
+    Some(format!("{}.{}.{}", version.major, version.minor, version.patch))
 }
 
 #[test]
@@ -132,10 +114,6 @@ impl fmt::Display for Remote {
     }
 }
 
-lazy_static! {
-    static ref REGEX_CONAN_REMOTE: Regex = Regex::new(r"(\S+):\s+(\S+)\s+(.*)").unwrap();
-}
-
 pub fn get_remote_list() -> Vec<Remote> {
     let output = Command::new("conan")
         .arg("remote")
@@ -152,7 +130,7 @@ pub fn get_remote_list() -> Vec<Remote> {
     let mut list: Vec<Remote> = Vec::new();
 
     for line in output_stdout.lines() {
-        let captures = REGEX_CONAN_REMOTE.captures(line.trim()).unwrap();
+        let captures = lazy_regex!(r"(\S+):\s+(\S+)\s+(.*)").captures(line.trim()).unwrap();
         let remote = Remote {
             name: captures[1].to_string(),
             url: captures[2].to_string(),
