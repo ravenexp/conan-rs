@@ -19,7 +19,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::version::ConanVersion;
+use crate::version::{ConanApi, ConanVersion};
 use build_info::{build_settings::BuildSettings, BuildInfo};
 
 /**
@@ -158,6 +158,7 @@ pub enum BuildPolicy {
 }
 
 pub struct InstallCommand<'a> {
+    conan_api: ConanApi,
     profile: Option<&'a str>,
     remote: Option<&'a str>,
     build_settings: BuildSettings,
@@ -167,7 +168,9 @@ pub struct InstallCommand<'a> {
     update_check: bool,
 }
 
+#[derive(Default)]
 pub struct InstallCommandBuilder<'a> {
+    conan_api: Option<ConanApi>,
     profile: Option<&'a str>,
     remote: Option<&'a str>,
     build_settings: Option<BuildSettings>,
@@ -179,15 +182,13 @@ pub struct InstallCommandBuilder<'a> {
 
 impl<'a> InstallCommandBuilder<'a> {
     pub fn new() -> InstallCommandBuilder<'a> {
-        InstallCommandBuilder {
-            profile: None,
-            remote: None,
-            build_settings: None,
-            build_policy: None,
-            recipe_path: None,
-            output_dir: None,
-            update_check: false,
-        }
+        Default::default()
+    }
+
+    /// Selects the Conan executable API version: `v1.x` or `v2.x`
+    pub fn with_conan_api(mut self, api: ConanApi) -> Self {
+        self.conan_api = Some(api);
+        self
     }
 
     pub fn with_profile(mut self, profile: &'a str) -> Self {
@@ -227,6 +228,7 @@ impl<'a> InstallCommandBuilder<'a> {
 
     pub fn build(self) -> InstallCommand<'a> {
         InstallCommand {
+            conan_api: self.conan_api.unwrap_or_default(),
             profile: self.profile,
             remote: self.remote,
             build_settings: self.build_settings.unwrap_or_default(),
@@ -276,9 +278,13 @@ impl<'a> InstallCommand<'a> {
 
         let output_dir = self.output_dir();
         if let Some(output_dir) = &output_dir {
-            let current_dir = env::current_dir().unwrap().to_path_buf();
-            if output_dir != &current_dir {
-                args.extend(&["-if", output_dir.to_str().unwrap()]);
+            if output_dir.as_path() != env::current_dir().unwrap() {
+                let out_dir_str = output_dir.to_str().unwrap();
+                args.extend(&["--output-folder", out_dir_str]);
+
+                if self.conan_api == ConanApi::V1 {
+                    args.extend(&["--install-folder", out_dir_str]);
+                }
             }
         }
 
